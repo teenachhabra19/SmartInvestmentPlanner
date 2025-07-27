@@ -1,10 +1,9 @@
 package com.example.Smart_Investment_Planner.service;
 
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.SignatureAlgorithm;
+import io.jsonwebtoken.*;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 
@@ -20,7 +19,10 @@ import java.util.function.Function;
 
 @Service
 public class JwtService {
+    @Value("${jwt.secret}")
     private String secretKey;
+    @Value("${jwt.expiration:86400000}")
+    private long jwtExpiration;
     public JwtService(){
         secretKey=generateSecretKey();
     }
@@ -35,11 +37,12 @@ public class JwtService {
     }
     public String generateToken(String username) {
         Map<String,Object> claims=new HashMap<>();
+        Date expiration = new Date(System.currentTimeMillis() + jwtExpiration);
         return Jwts.builder()
                 .setClaims(claims)
                 .setSubject(username)
                 .setIssuedAt(new Date(System.currentTimeMillis()))
-                .setExpiration(new Date(System.currentTimeMillis() +1000*60*10))
+                .setExpiration(expiration)
                 .signWith(getKey(), SignatureAlgorithm.HS256).compact();
     }
 
@@ -58,12 +61,30 @@ public class JwtService {
     }
 
     private Claims extractAllClaims(String token) {
-        return Jwts.parserBuilder().setSigningKey(getKey()).build().parseClaimsJws(token).getBody();
+        try{
+            return Jwts.parserBuilder().setSigningKey(getKey()).build().parseClaimsJws(token).getBody();
+        }catch(ExpiredJwtException e){
+            throw new JwtException("Token has expired", e);
+        }
+        catch (Exception e) {
+            throw new JwtException("Invalid token", e);
+        }
     }
 
     public boolean validateToken(String token, UserDetails userDetails) {
-        final String userName=extractUserName(token);
-        return (userName.equals(userDetails.getUsername()) &&!isTokenExpired(token));
+        return isTokenValid(token,userDetails);
+    }
+
+    private boolean isTokenValid(String token, UserDetails userDetails) {
+       if(token==null || token.trim().isEmpty()){
+           return false;
+       }
+       try{
+           final String userName=extractUserName(token);
+           return (userName.equals(userDetails.getUsername()) &&!isTokenExpired(token));
+       }catch(JwtException e){
+           return false;
+       }
     }
 
     private boolean isTokenExpired(String token) {
